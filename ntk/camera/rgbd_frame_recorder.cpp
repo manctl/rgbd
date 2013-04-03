@@ -175,7 +175,9 @@ namespace ntk
           filename = cv::format("%s/raw/color.jpg", frame_dir.c_str());
       else
           filename = cv::format("%s/raw/color.bmp", frame_dir.c_str());
-      imwrite(filename, image.rawRgb());
+
+      if(image.rawRgb().data)
+        imwrite(filename, image.rawRgb());
 
       if (!m_only_raw && image.mappedDepth().data)
       {
