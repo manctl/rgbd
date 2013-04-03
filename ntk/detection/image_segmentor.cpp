@@ -30,6 +30,13 @@ initializeFromFirstImage(const RGBDImage &image, const Pose3D &estimated_pose)
 {
     normalized_pose = estimated_pose;
     delta_normalized_pose = normalized_pose;
+
+    if(image.calibration().empty())
+    {
+        ntk_warn("ImageSegmentor::initializeFromFirstImage: Uncalibrated image.");
+        return false;
+    }
+
     delta_normalized_pose.applyTransformBefore(image.calibration()->depth_pose->inverted());
     return true;
 }
