@@ -127,10 +127,11 @@ Pose3D RGBDImageHeader :: sensorRgbPose() const
 
 Pose3D RGBDImageHeader :: estimatedWorldRgbPose() const
 {
-    ntk_assert(calibration, "Calibration must be available!");
     Pose3D pose = estimatedWorldDepthPose();
     if (!pose.isValid())
         return pose;
+
+    ntk_assert(calibration, "Calibration must be available!");
     pose.toRightCamera(calibration->rgb_intrinsics, calibration->R, calibration->T);
     return pose;
 }
