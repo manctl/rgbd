@@ -257,6 +257,7 @@ void print_log (const int level, const char* prefix, const char* fmt, ...)
 
     ntk::logFileLock.lock();
     FILE* handle;
+    bool needsUnlocking = true;
 
     if (0 != ntk::logFileHandle)
     {
@@ -265,6 +266,8 @@ void print_log (const int level, const char* prefix, const char* fmt, ...)
     else
     {
         ntk::logFileLock.unlock();
+        needsUnlocking = false;
+
         if (level == 0)
             handle = stderr;
         else
@@ -279,7 +282,8 @@ void print_log (const int level, const char* prefix, const char* fmt, ...)
 
     fflush (handle);
 
-    logFileLock.unlock();
+    if (needsUnlocking)
+        logFileLock.unlock();
 }
 
 }
