@@ -386,6 +386,7 @@ prepareFrameImage (RGBDImage& image, RGBDCalibrationConstPtr calibration,
 {
     image.rawDepth16bitsRef() = cv::Mat1w(calibration->rawDepthSize());
     image.rawRgbRef() = cv::Mat3b(calibration->rawRgbSize());
+    image.rawRgbRef() = cv::Vec3b(0,0,0);
     image.setCalibration(calibration);
     image.setCameraSerial(serial);
     image.setGrabberType(grabber_type);
@@ -486,6 +487,7 @@ struct Openni2Grabber::Impl
         , driver(driver_)
         , uri(uri_)
         , subsampling (1)
+        , hasColorCamera (false)
     {
         color.listener.that = this;
         depth.listener.that = this;
@@ -515,7 +517,7 @@ struct Openni2Grabber::Impl
             depth.ready = true;
         }
 
-        if (color.stream == stream)
+        if (hasColorCamera && color.stream == stream)
         {
             ntk_dbg(2) << "OpenNI2: Color frame available.\n";
 
@@ -531,7 +533,7 @@ struct Openni2Grabber::Impl
     void
     onPartialFrame ()
     {
-        if (!color.ready || !depth.ready)
+        if ((hasColorCamera && !color.ready) || !depth.ready)
             return; // Stubbornly refuse to expose incomplete frames.
 
         image.setTimestamp(that->getCurrentTimestamp());
@@ -543,7 +545,8 @@ struct Openni2Grabber::Impl
             QMutexLocker _(&mutex);
 
             depthFrame = depth.frame;
-            colorFrame = color.frame;
+            if (hasColorCamera)
+                colorFrame = color.frame;
 
             depth.ready = false;
             color.ready = false;
@@ -552,7 +555,7 @@ struct Openni2Grabber::Impl
         if (!decodeDepthFrame(image, depthFrame))
             return;
 
-        if (!decodeColorFrame(image, colorFrame))
+        if (hasColorCamera && !decodeColorFrame(image, colorFrame))
             return;
 
         {
@@ -599,11 +602,21 @@ struct Openni2Grabber::Impl
         cx /= subsampling;
         cy /= subsampling;
 
-        int rgb_width = color.stream.getVideoMode().getResolutionX();
-        int rgb_height = color.stream.getVideoMode().getResolutionY();
-
         int depth_width = depth.stream.getVideoMode().getResolutionX();
         int depth_height = depth.stream.getVideoMode().getResolutionY();
+
+        int rgb_width = -1;
+        int rgb_height = -1;
+        if (hasColorCamera)
+        {
+            rgb_width = color.stream.getVideoMode().getResolutionX();
+            rgb_height = color.stream.getVideoMode().getResolutionY();
+        }
+        else
+        {
+            rgb_width = depth_width;
+            rgb_height = depth_height;
+        }
 
         ret->setRawRgbSize(cv::Size(rgb_width, rgb_height));
         ret->setRgbSize(cv::Size(rgb_width, rgb_height));
@@ -657,7 +670,7 @@ struct Openni2Grabber::Impl
         ret->setMaxDepthInMeters (depth.stream.getMaxPixelValue () * ret->rawDepthUnitInMeters());
 
         // Estimate rgb intrinsics and stereo transform.
-        if (1)
+        if (hasColorCamera)
         {
             cv::RNG rng;
 
@@ -703,7 +716,7 @@ struct Openni2Grabber::Impl
 
             if (num_points < 10)
             {
-                ntk_warn ("Cannot calibrate this OpenNI2 device.\n");
+                ntk_warn ("Cannot automatically re-calibrate color and depth with this OpenNI2 device. Normal if it is an Asus Xtion.\n");
             }
             else
             {
@@ -746,8 +759,8 @@ struct Openni2Grabber::Impl
 
         ret->rgb_pose = new Pose3D();
         ret->rgb_pose->toRightCamera(ret->rgb_intrinsics,
-                                              ret->R,
-                                              ret->T);
+                                     ret->R,
+                                     ret->T);
 
         ret->computeInfraredIntrinsicsFromDepth();
 
@@ -766,6 +779,7 @@ struct Openni2Grabber::Impl
     bool mirrored;
     bool customBayerDecoding;
     bool hardwareRegistration;
+    bool hasColorCamera;
 
     struct Channel
     {
@@ -860,31 +874,39 @@ Openni2Grabber::connectToDevice ()
     const SensorInfo* const colorInfo = impl->device.getSensorInfo(SENSOR_COLOR);
     if (NULL == colorInfo)
     {
-        ntk_error ("No color sensor.\n");
-        return false;
+        ntk_warn ("No color sensor.\n");
+        impl->hasColorCamera = false;
+        impl->hardwareRegistration = false;
+    }
+    else
+    {
+        impl->hasColorCamera = true;
     }
 
-    status = impl->color.stream.create(impl->device, SENSOR_COLOR);
-    if (STATUS_OK != status)
+    if (impl->hasColorCamera)
     {
-        ntk_error("OpenNI2: Couldn't create color stream: %s\n", OpenNI::getExtendedError());
-        return false;
-    }
-
-    if (!prepareColorStream(impl->color.stream, *colorInfo))
-    {
-        ntk_error("OpenNI2: Couldn't prepare color stream: %s\n", OpenNI::getExtendedError());
-        return false;
-    }
-
-    if (impl->hardwareRegistration)
-    {
-        if (impl->device.isImageRegistrationModeSupported (IMAGE_REGISTRATION_DEPTH_TO_COLOR))
-            impl->device.setImageRegistrationMode (IMAGE_REGISTRATION_DEPTH_TO_COLOR);
-        else
+        status = impl->color.stream.create(impl->device, SENSOR_COLOR);
+        if (STATUS_OK != status)
         {
-            ntk_warn ("Depth - Color registration not supported by this device.\n");
-            impl->hardwareRegistration = false;
+            ntk_error("OpenNI2: Couldn't create color stream: %s\n", OpenNI::getExtendedError());
+            return false;
+        }
+
+        if (!prepareColorStream(impl->color.stream, *colorInfo))
+        {
+            ntk_error("OpenNI2: Couldn't prepare color stream: %s\n", OpenNI::getExtendedError());
+            return false;
+        }
+
+        if (impl->hardwareRegistration)
+        {
+            if (impl->device.isImageRegistrationModeSupported (IMAGE_REGISTRATION_DEPTH_TO_COLOR))
+                impl->device.setImageRegistrationMode (IMAGE_REGISTRATION_DEPTH_TO_COLOR);
+            else
+            {
+                ntk_warn ("Depth - Color registration not supported by this device.\n");
+                impl->hardwareRegistration = false;
+            }
         }
     }
 
@@ -896,13 +918,15 @@ Openni2Grabber::connectToDevice ()
     // FIXME: SENSOR_IR is also available. Expose it.
 
     impl->depth.stream.start();
-    impl->color.stream.start();
+    if (impl->hasColorCamera)
+        impl->color.stream.start();
 
     if (!m_calib_data)
         m_calib_data = impl->estimateCalibration();
 
     impl->depth.stream.stop();
-    impl->color.stream.stop();
+    if (impl->hasColorCamera)
+        impl->color.stream.stop();
 
     setCameraSerial (readSerialNumber (impl->device));
 
@@ -920,7 +944,8 @@ Openni2Grabber::disconnectFromDevice ()
 
     m_connected = false;
 
-    impl->color.stream.destroy();
+    if (impl->hasColorCamera)
+        impl->color.stream.destroy();
     impl->depth.stream.destroy();
 
     impl->device.close();
@@ -964,6 +989,11 @@ Openni2Grabber::setUseHardwareRegistration(bool enable)
     impl->hardwareRegistration = enable;
 }
 
+bool Openni2Grabber::hasColorCamera() const
+{
+    return impl->hasColorCamera;
+}
+
 void
 Openni2Grabber::run ()
 {
@@ -975,8 +1005,11 @@ Openni2Grabber::run ()
     Status status = STATUS_OK;
 
     // FIXME: Handle differing depth and color frame sizes.
-    if (!haveEqualSize(impl->depth.stream.getVideoMode(), impl->color.stream.getVideoMode()))
-        ntk_error("OpenNI2: Cannot start grabbing: Incompatible depth and stream sizes.");
+    if (impl->hasColorCamera)
+    {
+        if (!haveEqualSize(impl->depth.stream.getVideoMode(), impl->color.stream.getVideoMode()))
+            ntk_error("OpenNI2: Cannot start grabbing: Incompatible depth and stream sizes.");
+    }
 
     const int frameWidth  = impl->depth.stream.getVideoMode().getResolutionX();
     const int frameHeight = impl->depth.stream.getVideoMode().getResolutionY();
@@ -992,21 +1025,26 @@ Openni2Grabber::run ()
         return;
     }
 
-    impl->color.stream.addNewFrameListener(&impl->color.listener);
-    impl->color.stream.start();
-    if (STATUS_OK  != status)
+    if (impl->hasColorCamera)
     {
-        ntk_error("OpenNI2: Cannot start grabbing: Couldn't start the color stream: %s\n", OpenNI::getExtendedError());
-        return;
+        impl->color.stream.addNewFrameListener(&impl->color.listener);
+        impl->color.stream.start();
+        if (STATUS_OK  != status)
+        {
+            ntk_error("OpenNI2: Cannot start grabbing: Couldn't start the color stream: %s\n", OpenNI::getExtendedError());
+            return;
+        }
     }
 
     while (!threadShouldExit())
         msleep(500);
 
-    impl->color.stream.stop();
+    if (impl->hasColorCamera)
+        impl->color.stream.stop();
     impl->depth.stream.stop();
 
-    impl->color.stream.removeNewFrameListener(&impl->color.listener);
+    if (impl->hasColorCamera)
+        impl->color.stream.removeNewFrameListener(&impl->color.listener);
     impl->depth.stream.removeNewFrameListener(&impl->depth.listener);
 }
 

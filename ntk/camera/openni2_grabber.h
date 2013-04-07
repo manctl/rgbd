@@ -93,6 +93,8 @@ public:
     void setCustomBayerDecoding (bool enabled);
     void setUseHardwareRegistration (bool enabled);
 
+    bool hasColorCamera () const;
+
 protected:
     virtual void run();
 
