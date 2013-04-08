@@ -811,9 +811,10 @@ bool Kin4WinGrabber :: connectToDevice()
         {
             estimateCalibration();
             updateCalibrationMinMaxDepth ();
-            m_current_image.setCalibration(m_calib_data);
-            m_rgbd_image.setCalibration(m_calib_data);
         }
+        m_current_image.setCalibration(m_calib_data);
+        m_rgbd_image.setCalibration(m_calib_data);
+
         m_connected = true;
     }
 
