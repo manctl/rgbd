@@ -17,6 +17,9 @@
  * Author: Nicolas Burrus <nicolas.burrus@manctl.com>
  */
 
+#include <cstddef>
+#define EIGEN_USE_NEW_STDVECTOR
+#include <Eigen/StdVector>
 
 #include "pcl_utils.h"
 #include "pcl_utils.hpp"
@@ -25,9 +28,6 @@
 #include <pcl/octree/octree.h>
 #include <pcl/search/kdtree.h>
 #include <pcl/surface/ear_clipping.h>
-
-#include<Eigen/StdVector>
-EIGEN_DEFINE_STL_VECTOR_SPECIALIZATION(Eigen::Vector2f)
 
 #include <set>
 
