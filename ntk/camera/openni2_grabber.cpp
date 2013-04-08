@@ -20,7 +20,7 @@
 #include "openni2_grabber.h"
 #include <OpenNI2/OpenNI.h>
 
-#include <brief/impl.h>
+#include <hub/impl.h>
 #include <ntk/camera/calibration.h>
 
 #include <set>
